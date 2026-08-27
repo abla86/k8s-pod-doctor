@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  schedule:
+    - cron: "41 3 * * 1"
 
 permissions:
   contents: read
@@ -14,10 +16,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Test
         run: python -m unittest discover -s tests -v
+
       - name: Compile
         run: python -m py_compile doctor.py
+
+      - name: Validate CLI without cluster access
+        run: |
+          python - <<'PY'
+          import doctor
+          healthy = {
+              "items": [{
+                  "metadata": {"namespace": "ci", "name": "healthy"},
+                  "status": {"containerStatuses": [{
+                      "name": "api",
+                      "ready": True,
+                      "state": {"running": {}}
+                  }]}
+              }]
+          }
+          findings = doctor.diagnose_pod(healthy["items"][0])
+          assert findings == []
+          print("Pod Doctor self-test passed.")
+          PY
