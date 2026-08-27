@@ -14,6 +14,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,21 +28,6 @@ jobs:
       - name: Compile
         run: python -m py_compile doctor.py
 
-      - name: Validate CLI without cluster access
+      - name: CLI self-test
         run: |
-          python - <<'PY'
-          import doctor
-          healthy = {
-              "items": [{
-                  "metadata": {"namespace": "ci", "name": "healthy"},
-                  "status": {"containerStatuses": [{
-                      "name": "api",
-                      "ready": True,
-                      "state": {"running": {}}
-                  }]}
-              }]
-          }
-          findings = doctor.diagnose_pod(healthy["items"][0])
-          assert findings == []
-          print("Pod Doctor self-test passed.")
-          PY
+          python -c "import doctor; healthy={'metadata':{'namespace':'ci','name':'healthy'},'status':{'containerStatuses':[{'name':'api','ready':True,'state':{'running':{}}}]}}; crash={'metadata':{'namespace':'ci','name':'crash'},'status':{'containerStatuses':[{'name':'api','state':{'waiting':{'reason':'CrashLoopBackOff'}}}]}}; assert doctor.diagnose_pod(healthy)==[]; f=doctor.diagnose_pod(crash); assert len(f)==1 and f[0]['reason']=='CrashLoopBackOff'; print('Pod Doctor self-test passed.')"
