@@ -50,3 +50,7 @@ The tool performs first-line status diagnosis. It does not automatically mutate 
 ## License
 
 MIT
+
+## Change-control audit
+
+See `docs/REPOSITORY-CHANGE-AUDIT-2026-08-28.md` for change-control and traceability rules.
