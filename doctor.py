@@ -1,25 +1,67 @@
-﻿import json
+import json
 import subprocess
 import sys
+
+
+def diagnose_pod(pod):
+    """Return structured findings for one Kubernetes pod."""
+    namespace = pod.get("metadata", {}).get("namespace", "unknown")
+    name = pod.get("metadata", {}).get("name", "unknown")
+    findings = []
+
+    for status in pod.get("status", {}).get("containerStatuses", []) or []:
+        state = status.get("state", {}) or {}
+        last_state = status.get("lastState", {}) or {}
+        container = status.get("name", "unknown")
+
+        waiting = state.get("waiting")
+        if waiting and waiting.get("reason") == "CrashLoopBackOff":
+            findings.append({
+                "namespace": namespace,
+                "name": name,
+                "container": container,
+                "reason": "CrashLoopBackOff",
+            })
+
+        terminated = state.get("terminated")
+        if terminated and terminated.get("reason") == "OOMKilled":
+            findings.append({
+                "namespace": namespace,
+                "name": name,
+                "container": container,
+                "reason": "OOMKilled",
+            })
+
+        previous = last_state.get("terminated")
+        if previous and previous.get("reason") == "OOMKilled":
+            findings.append({
+                "namespace": namespace,
+                "name": name,
+                "container": container,
+                "reason": "Previous OOMKilled",
+            })
+
+        if status.get("ready") is False and not waiting and not terminated:
+            findings.append({
+                "namespace": namespace,
+                "name": name,
+                "container": container,
+                "reason": "NotReady",
+            })
+
+    return findings
+
 
 def get_unhealthy_pods():
     print("K8s Pod Doctor health check...")
 
     try:
         result = subprocess.run(
-            [
-                "kubectl",
-                "get",
-                "pods",
-                "--all-namespaces",
-                "-o",
-                "json"
-            ],
+            ["kubectl", "get", "pods", "--all-namespaces", "-o", "json"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
-
         data = json.loads(result.stdout)
 
     except FileNotFoundError:
@@ -38,56 +80,13 @@ def get_unhealthy_pods():
     issues_found = False
 
     for pod in data.get("items", []):
-        namespace = pod.get("metadata", {}).get("namespace", "unknown")
-        name = pod.get("metadata", {}).get("name", "unknown")
-
-        statuses = (
-            pod.get("status", {})
-            .get("containerStatuses", [])
-            or []
-        )
-
-        for status in statuses:
-            state = status.get("state", {}) or {}
-            last_state = status.get("lastState", {}) or {}
-
-            waiting = state.get("waiting")
-
-            if waiting and waiting.get("reason") == "CrashLoopBackOff":
-                print(
-                    f"ALERT: Pod {namespace}/{name} "
-                    f"is in CrashLoopBackOff."
-                )
-                issues_found = True
-
-            terminated = state.get("terminated")
-
-            if terminated and terminated.get("reason") == "OOMKilled":
-                print(
-                    f"MEMORY: Pod {namespace}/{name} "
-                    f"was OOMKilled."
-                )
-                issues_found = True
-
-            previous = last_state.get("terminated")
-
-            if previous and previous.get("reason") == "OOMKilled":
-                print(
-                    f"MEMORY: Pod {namespace}/{name} "
-                    f"was previously OOMKilled."
-                )
-                issues_found = True
-
-            if (
-                status.get("ready") is False
-                and not waiting
-                and not terminated
-            ):
-                print(
-                    f"NOT READY: Pod {namespace}/{name} "
-                    f"container {status.get('name', 'unknown')}."
-                )
-                issues_found = True
+        for finding in diagnose_pod(pod):
+            issues_found = True
+            prefix = "MEMORY" if "OOMKilled" in finding["reason"] else "ALERT"
+            print(
+                f"{prefix}: Pod {finding['namespace']}/{finding['name']} "
+                f"container {finding['container']} — {finding['reason']}."
+            )
 
     if not issues_found:
         print("No configured unhealthy pod conditions detected.")
@@ -97,7 +96,6 @@ def get_unhealthy_pods():
         "\nRecommendation: inspect the affected pod with "
         "'kubectl describe pod' and 'kubectl logs'."
     )
-
     return 1
 
 
